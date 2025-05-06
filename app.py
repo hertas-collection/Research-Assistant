@@ -1,12 +1,9 @@
-from flask import Flask, render_template, request, jsonify
+from flask import Flask, render_template, request, jsonify, send_file
 import os
-from pytube import YouTube
-import pygame
+import yt_dlp
 import threading
-import time
 
 app = Flask(__name__)
-pygame.mixer.init()
 
 SOUND_DIR = "sounds"
 if not os.path.exists(SOUND_DIR):
@@ -17,10 +14,18 @@ key_mappings = {}
 
 def download_audio(url, key):
     try:
-        yt = YouTube(url)
-        audio_stream = yt.streams.filter(only_audio=True).first()
         filename = f"{SOUND_DIR}/{key}.mp3"
-        audio_stream.download(output_path=SOUND_DIR, filename=f"{key}.mp3")
+        ydl_opts = {
+            'format': 'bestaudio/best',
+            'outtmpl': filename,
+            'postprocessors': [{
+                'key': 'FFmpegExtractAudio',
+                'preferredcodec': 'mp3',
+                'preferredquality': '192',
+            }],
+        }
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.download([url])
         sounds[key] = filename
         return True
     except Exception as e:
@@ -42,13 +47,12 @@ def save():
 
 @app.route('/play/<key>')
 def play(key):
-    if key in sounds:
-        if pygame.mixer.music.get_busy():
-            pygame.mixer.music.stop()
-        pygame.mixer.music.load(sounds[key])
-        pygame.mixer.music.play()
-        return jsonify({"status": "success"})
+    if key in sounds and os.path.exists(sounds[key]):
+        return send_file(sounds[key], mimetype='audio/mpeg')
     return jsonify({"status": "error", "message": "Sound not found"})
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5000)
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
