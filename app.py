@@ -1,4 +1,6 @@
+
 from flask import Flask, request, jsonify
+import requests
 
 class User:
     def __init__(self, name: str):
@@ -170,9 +172,62 @@ def handle_request():
 
     user.update_tone(user_request)
     tone = "formally" if user.tone_score < -0.3 else "casually" if user.tone_score > 0.3 else "neutrally"
-    response = f"I've noted your request and will respond {tone}. How can I help you further?"
+    
+    try:
+        # Search Wikipedia for relevant information
+        search_url = f"https://en.wikipedia.org/w/api.php"
+        params = {
+            "action": "query",
+            "format": "json",
+            "list": "search",
+            "srsearch": user_request,
+            "utf8": 1,
+            "formatversion": 2
+        }
+        
+        search_response = requests.get(search_url, params=params)
+        search_data = search_response.json()
+        
+        if search_data["query"]["search"]:
+            result = search_data["query"]["search"][0]
+            title = result["title"]
+            snippet = result["snippet"].replace('<span class="searchmatch">', '').replace('</span>', '')
+            
+            # Get full page content
+            page_params = {
+                "action": "query",
+                "format": "json",
+                "titles": title,
+                "prop": "extracts",
+                "exintro": True,
+                "explaintext": True,
+                "formatversion": 2
+            }
+            
+            page_response = requests.get(search_url, params=page_params)
+            page_data = page_response.json()
+            
+            if page_data["query"]["pages"]:
+                extract = page_data["query"]["pages"][0].get("extract", "")
+                # Get first two sentences
+                sentences = extract.split('. ')[:2]
+                response = f"{'. '.join(sentences)}."
+            else:
+                response = snippet.strip()
+        else:
+            response = "No information found. Please rephrase your question."
+            
+    except Exception as e:
+        print(f"Error during web search: {e}")
+        response = f"I've noted your request and will respond {tone}. How can I help you further?"
     
     return jsonify({"success": True, "message": response, "type": "response"})
+
+if __name__ == '__main__':
+    from datetime import datetime
+    import re
+    app.run(host='0.0.0.0', port=5000, debug=True)
+
 
 if __name__ == '__main__':
     from datetime import datetime
