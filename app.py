@@ -1,15 +1,12 @@
-from flask import Flask, render_template, request, jsonify
-import re
-from typing import List, Dict
-from datetime import datetime
+from flask import Flask, request, jsonify
 
 class User:
     def __init__(self, name: str):
         self.name = name
-        self.requests: List[Dict] = []
+        self.requests = []
         self.tone_score = 0
 
-    def update_tone(self, message: str) -> None:
+    def update_tone(self, message: str):
         casual_markers = len(re.findall(r'(!+|\?+|lol|haha|:D|;)|hey|hi', message.lower()))
         formal_markers = len(re.findall(r'(please|would you|could you|sincerely|regards)', message.lower()))
         self.tone_score = max(-1, min(1, self.tone_score + (casual_markers - formal_markers) * 0.2))
@@ -18,47 +15,133 @@ class ResearchAssistant:
     def __init__(self):
         self.users = {}
 
-    def get_response_style(self, user) -> tuple:
-        if user.tone_score < -0.3:
-            greeting = f"Good day, {user.name}."
-            closing = "Best regards,"
-        elif user.tone_score > 0.3:
-            greeting = f"Hey {user.name}! 😊"
-            closing = "Cheers!"
-        else:
-            greeting = f"Hi {user.name}!"
-            closing = "Best,"
-        return (greeting, closing)
-
-    def process_request(self, user, request: str) -> str:
-        user.requests.append({
-            "timestamp": datetime.now(),
-            "request": request
-        })
-        user.update_tone(request)
-        greeting, closing = self.get_response_style(user)
-
-        if "previous requests" in request.lower():
-            return self._format_previous_requests(user)
-
-        response = f"{greeting}\n\nI've noted your request. How can I help you with this?\n\n{closing}"
-        return response
-
-    def _format_previous_requests(self, user) -> str:
-        greeting, closing = self.get_response_style(user)
-        response = []
-        for req in user.requests[:-1]:
-            timestamp = req["timestamp"].strftime("%Y-%m-%d %H:%M:%S")
-            response.append(f"[{timestamp}] {req['request']}")
-        return "\n".join(response)
-
-
 app = Flask(__name__)
 assistant = ResearchAssistant()
 
 @app.route('/')
 def home():
-    return render_template('index.html')
+    return '''
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Research Assistant</title>
+        <style>
+            body { font-family: 'Segoe UI', sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; background: #f5f5f5; }
+            .container { background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+            .chat-container { height: 400px; overflow-y: auto; border: 1px solid #ddd; padding: 20px; margin: 20px 0; border-radius: 5px; }
+            input[type="text"] { width: 70%; padding: 10px; border: 1px solid #ddd; border-radius: 5px; margin-right: 10px; }
+            button { padding: 10px 20px; background: #007bff; color: white; border: none; border-radius: 5px; cursor: pointer; }
+            button:hover { background: #0056b3; }
+            .message { margin: 10px 0; padding: 10px; border-radius: 5px; }
+            .assistant { background: #e9ecef; }
+            .user { background: #007bff; color: white; text-align: right; }
+            #registration { text-align: center; margin-bottom: 30px; }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h1 style="text-align: center;">Research Assistant</h1>
+            
+            <div id="registration">
+                <input type="text" id="nameInput" placeholder="Enter your name">
+                <button onclick="register()">Register</button>
+            </div>
+
+            <div id="chat" style="display: none;">
+                <div class="chat-container" id="chatContainer"></div>
+                <div class="input-group">
+                    <input type="text" id="requestInput" placeholder="Type your request here">
+                    <button onclick="sendRequest()">Send</button>
+                    <button onclick="getHistory()">View History</button>
+                </div>
+            </div>
+        </div>
+
+        <script>
+            let userName = '';
+
+            async function register() {
+                const nameInput = document.getElementById('nameInput');
+                const name = nameInput.value.trim();
+                
+                if (!name) {
+                    alert('Please enter your name');
+                    return;
+                }
+
+                const response = await fetch('/register', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({name})
+                });
+
+                const data = await response.json();
+                if (data.success) {
+                    userName = name;
+                    document.getElementById('registration').style.display = 'none';
+                    document.getElementById('chat').style.display = 'block';
+                    addMessage(data.message, 'assistant');
+                }
+            }
+
+            async function sendRequest() {
+                const requestInput = document.getElementById('requestInput');
+                const request = requestInput.value.trim();
+                
+                if (!request) return;
+
+                addMessage(request, 'user');
+                requestInput.value = '';
+
+                const response = await fetch('/request', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({name: userName, request})
+                });
+
+                const data = await response.json();
+                if (data.success) {
+                    addMessage(data.message, 'assistant');
+                }
+            }
+
+            async function getHistory() {
+                const response = await fetch('/request', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({name: userName, request: 'previous requests'})
+                });
+
+                const data = await response.json();
+                if (data.success && data.type === 'history') {
+                    data.message.split('\\n').forEach(msg => {
+                        if (msg.trim()) addMessage(msg, 'assistant');
+                    });
+                }
+            }
+
+            function addMessage(message, type) {
+                const chatContainer = document.getElementById('chatContainer');
+                const messageDiv = document.createElement('div');
+                messageDiv.className = `message ${type}`;
+                messageDiv.textContent = message;
+                chatContainer.appendChild(messageDiv);
+                chatContainer.scrollTop = chatContainer.scrollHeight;
+            }
+
+            document.getElementById('requestInput')?.addEventListener('keypress', function(e) {
+                if (e.key === 'Enter') sendRequest();
+            });
+
+            document.getElementById('nameInput')?.addEventListener('keypress', function(e) {
+                if (e.key === 'Enter') register();
+            });
+        </script>
+    </body>
+    </html>
+    '''
 
 @app.route('/register', methods=['POST'])
 def register():
@@ -78,12 +161,20 @@ def handle_request():
         return jsonify({"success": False, "message": "Please register first"})
 
     user = assistant.users[name]
-    response = assistant.process_request(user, user_request)
-
+    user.requests.append({"timestamp": datetime.now(), "request": user_request})
+    
     if "previous requests" in user_request.lower():
-        return jsonify({"success": True, "message": "\n".join(response), "type": "history"})
+        history = "\n".join([f"[{req['timestamp'].strftime('%Y-%m-%d %H:%M:%S')}] {req['request']}" 
+                           for req in user.requests[:-1]])
+        return jsonify({"success": True, "message": history, "type": "history"})
 
+    user.update_tone(user_request)
+    tone = "formally" if user.tone_score < -0.3 else "casually" if user.tone_score > 0.3 else "neutrally"
+    response = f"I've noted your request and will respond {tone}. How can I help you further?"
+    
     return jsonify({"success": True, "message": response, "type": "response"})
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    from datetime import datetime
+    import re
+    app.run(host='0.0.0.0', port=5000, debug=True)
